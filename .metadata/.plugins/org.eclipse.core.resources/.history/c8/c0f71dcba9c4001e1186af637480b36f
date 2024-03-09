@@ -1,0 +1,138 @@
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+// Define the pins for the 7447 decoder and the 7-segments
+#define DECODER_PORT PORTC
+#define DECODER_DDR DDRC
+#define SEGMENT_PORT PORTA
+#define SEGMENT_DDR DDRA
+
+// Define the timer1 prescaler value (1024)
+#define PRESCALER 64
+
+// Define the timer1 compare value (15624)
+#define COMPARE 15624
+
+// Define the global variables for the Stop Watch time
+volatile uint8_t seconds = 0;
+volatile uint8_t minutes = 0;
+volatile uint8_t hours = 0;
+
+// Define the global variable for the Stop Watch state
+volatile uint8_t state = 1; // 1 for running, 0 for paused
+
+// Define the interrupt service routine for timer1 compare match
+ISR(TIMER1_COMPA_vect)
+{
+  // Increment the seconds and update the minutes and hours accordingly
+  seconds++;
+  if (seconds == 60)
+  {
+    seconds = 0;
+    minutes++;
+    if (minutes == 60)
+    {
+      minutes = 0;
+      hours++;
+      if (hours == 24)
+      {
+        hours = 0;
+      }
+    }
+  }
+}
+
+// Define the interrupt service routine for INT0 (reset button)
+ISR(INT0_vect)
+{
+  // Reset the Stop Watch time to zero
+  seconds = 0;
+  minutes = 0;
+  hours = 0;
+}
+
+// Define the interrupt service routine for INT1 (pause button)
+ISR(INT1_vect)
+{
+  // Toggle the Stop Watch state
+  state = !state;
+  // If paused, stop the timer1
+  if (state == 0)
+  {
+    TCCR1B &= ~(1 << CS10) & ~(1 << CS12); // Clear the clock select bits
+  }
+  // If resumed, start the timer1
+  else
+  {
+    TCCR1B |= (1 << CS10) | (1 << CS12); // Set the clock select bits to 1024
+  }
+}
+
+// Define the interrupt service routine for INT2 (resume button)
+ISR(INT2_vect)
+{
+  // Resume the Stop Watch state
+  state = 1;
+  // Start the timer1
+  TCCR1B |= (1 << CS10) | (1 << CS12); // Set the clock select bits to 1024
+}
+
+// Define the function to display a digit on a 7-segment
+void display_digit(uint8_t digit, uint8_t segment)
+{
+  // Turn off all the 7-segments
+  SEGMENT_PORT = 0x00;
+  // Turn on the selected 7-segment
+  SEGMENT_PORT |= (1 << segment);
+  // Send the digit to the 7447 decoder
+  DECODER_PORT = digit;
+  // Wait for 5 ms
+  _delay_ms(5);
+}
+
+// Define the function to display the Stop Watch time on the 6 7-segments
+// Define the function to display the Stop Watch time on the 6 7-segments
+void display_time()
+{
+  // Display the minutes (two digits)
+  display_digit(minutes / 10, 2); // Most significant digit
+  display_digit(minutes % 10, 3); // Least significant digit
+  // Display the seconds (two digits)
+  display_digit(seconds / 10, 4); // Most significant digit
+  display_digit(seconds % 10, 5); // Least significant digit
+  // Display the hours (two digits)
+  display_digit(hours / 10, 0); // Most significant digit
+  display_digit(hours % 10, 1); // Least significant digit
+}
+
+// Define the main function
+int main(void)
+{
+  // Initialize the 7447 decoder and the 7-segments as output
+  DECODER_DDR = 0x0F; // First 4 pins as output
+  SEGMENT_DDR = 0x3F; // First 6 pins as output
+  // Initialize the timer1 in CTC mode with compare value 976
+  TCCR1A = 0x00; // Normal port operation
+  TCCR1B = (1 << WGM12); // CTC mode
+
+  // Set the compare value
+  OCR1A = COMPARE;
+  TIMSK = (1 << OCIE1A); // Enable the compare match interrupt
+  // Initialize the external interrupts INT0, INT1, and INT2
+  MCUCR = (1 << ISC01) | (1 << ISC11) | (1 << ISC10); // Falling edge for INT0, rising edge for INT1
+  MCUCSR = (1 << ISC2); // Falling edge for INT2
+  GICR = (1 << INT0) | (1 << INT1) | (1 << INT2); // Enable the external interrupts
+  // Enable the global interrupts
+  sei();
+  // Start the timer1 with prescaler 64
+  TCCR1B |= (1 << CS10) | (1 << CS11); // Set the clock select bits to 64
+  // Loop forever
+  while (1)
+  {
+    // Display the Stop Watch time on the 6 7-segments
+    display_time();
+  }
+  // Return 0
+  return 0;
+}

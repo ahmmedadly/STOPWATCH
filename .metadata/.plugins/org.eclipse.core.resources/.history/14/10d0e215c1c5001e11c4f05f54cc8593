@@ -1,0 +1,105 @@
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+
+volatile uint8_t second = 0;
+volatile uint8_t minute = 0;
+volatile uint8_t hour = 0;
+
+void TIMER1_Init(void) {
+    TCCR1A = 0; // Non-PWM mode
+    TCCR1B = (1 << WGM12) | (1 << CS10) | (1 << CS11); // CTC mode, 64 prescaler
+    TCNT1 = 0;
+    OCR1A = 15625;
+    TIMSK |= (1 << OCIE1A); // Enable interrupt on compare match
+    sei(); // Enable global interrupt
+}
+
+ISR(TIMER1_COMPA_vect) {
+    second++;
+
+    if (second == 60) {
+        second = 0;
+        minute++;
+    }
+
+    if (minute == 60) {
+        second = 0;
+        minute = 0;
+        hour++;
+    }
+
+    if (hour == 12) {
+        second = 0;
+        minute = 0;
+        hour = 0;
+    }
+}
+
+void INT0_Init_RESET(void) {
+    DDRD &= ~(1 << PD2); // Set PD2 as input pin
+    PORTD |= (1 << PD2); // Activate internal pull-up
+    MCUCR |= (1 << ISC01); // Enable interrupt on falling edge
+    GICR |= (1 << INT0); // Enable INT0 interrupt
+    sei(); // Enable global interrupt
+}
+
+ISR(INT0_vect) {
+    second = 0;
+    minute = 0;
+    hour = 0;
+    TCCR1B |= (1 << CS10) | (1 << CS11);
+}
+
+void INT1_Init_PAUSED(void) {
+    DDRD &= ~(1 << PD3); // Set PD3 as input pin
+    MCUCR |= (1 << ISC10) | (1 << ISC11); // Enable interrupt on rising edge
+    GICR |= (1 << INT1); // Enable INT1 interrupt
+    sei(); // Enable global interrupt
+}
+
+ISR(INT1_vect) {
+    // Disable clock when paused to stop the timer
+    TCCR1B &= ~((1 << CS10) | (1 << CS11) | (1 << CS12));
+}
+
+void INT2_Init_RESUME(void) {
+    DDRB &= ~(1 << PB2); // Set PB2 as input pin
+    PORTD |= (1 << PB2); // Activate internal pull-up
+    MCUCR &= ~(1 << ISC2); // Enable interrupt on falling edge
+    GICR |= (1 << INT2); // Enable INT2 interrupt
+    sei(); // Enable global interrupt
+}
+
+ISR(INT2_vect) {
+    // Resume the timer
+    TCCR1B |= (1 << CS10) | (1 << CS11);
+}
+
+void update_display(void) {
+    const uint8_t display_pins[] = {PA5, PA4, PA3, PA2, PA1, PA0};
+
+    for (uint8_t i = 0; i < 6; ++i) {
+        PORTA = (1 << display_pins[i]);
+        PORTC = (i % 2 == 0) ? (second / 10) : (second % 10);
+        _delay_ms(1);
+    }
+}
+
+int main(void) {
+    DDRC = 0x0F;
+    PORTC = 0x00;
+    DDRA = 0xFF;
+    PORTA = 0xFF;
+
+    INT0_Init_RESET();
+    INT1_Init_PAUSED();
+    INT2_Init_RESUME();
+    TIMER1_Init();
+
+    while (1) {
+        update_display();
+    }
+
+    return 0;
+}

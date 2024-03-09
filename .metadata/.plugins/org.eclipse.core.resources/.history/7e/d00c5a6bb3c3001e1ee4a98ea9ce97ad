@@ -1,0 +1,85 @@
+#include <avr/io.h>
+#include <avr/interrupt.h>
+
+volatile uint8_t hours = 0, minutes = 0, seconds = 0;
+volatile uint8_t stopwatch_running = 1;  // 1 for running, 0 for paused
+
+void init_timer1() {
+    TCCR1B |= (1 << WGM12); // Configure Timer1 in CTC mode
+    OCR1A = 999; // Set compare value for 1ms resolution at 1MHz frequency
+    TIMSK |= (1 << OCIE1A); // Enable Timer1 compare interrupt
+    TCCR1B |= (1 << CS10); // Start Timer1 with no prescaler
+}
+
+void init_interrupts() {
+    GICR |= (1 << INT0) | (1 << INT1) | (1 << INT2); // Enable INT0, INT1, INT2 interrupts
+    MCUCR |= (1 << ISC01) | (1 << ISC11); // Falling edge for INT0, rising edge for INT1
+    MCUCSR &= ~(1 << ISC2); // Falling edge for INT2
+    sei(); // Enable global interrupts
+}
+
+void init_ports() {
+    DDRA = 0xFF; // Configure PORTA as output for 7-segment enable/disable pins
+    DDRC = 0xFF; // Configure PORTC as output for 7447 decoder pins
+    PORTD |= (1 << PD2) | (1 << PD3) | (1 << PD6); // Enable pull-up for INT0, INT1, INT2
+}
+
+void display_7seg(uint8_t value) {
+    PORTC = value; // Display value on 7-segments
+}
+
+ISR(TIMER1_COMPA_vect) {
+    if (stopwatch_running) {
+        seconds++;
+
+        if (seconds == 60) {
+            seconds = 0;
+            minutes++;
+
+            if (minutes == 60) {
+                minutes = 0;
+                hours++;
+
+                if (hours == 24) {
+                    hours = 0;
+                }
+            }
+        }
+    }
+
+    display_7seg((hours / 10) << 4 | (hours % 10));
+    PORTA = 0x01; // Enable 7-segment for hours
+    _delay_ms(2);
+
+    display_7seg((minutes / 10) << 4 | (minutes % 10));
+    PORTA = 0x02; // Enable 7-segment for minutes
+    _delay_ms(2);
+
+    display_7seg((seconds / 10) << 4 | (seconds % 10));
+    PORTA = 0x04; // Enable 7-segment for seconds
+    _delay_ms(2);
+}
+
+ISR(INT0_vect) {
+    seconds = minutes = hours = 0; // Reset stopwatch on falling edge of INT0
+}
+
+ISR(INT1_vect) {
+    stopwatch_running = !stopwatch_running; // Toggle stopwatch running state on rising edge of INT1
+}
+
+ISR(INT2_vect) {
+    stopwatch_running = 1; // Resume stopwatch on falling edge of INT2
+}
+
+int main(void) {
+    init_ports();
+    init_timer1();
+    init_interrupts();
+
+    while (1) {
+        // Main loop
+    }
+
+    return 0;
+}
